@@ -118,9 +118,9 @@
     const map = L.map('map', { zoomControl: false }).setView(CONFIG.MAP_CENTER, CONFIG.MAP_ZOOM);
     L.control.zoom({ position: 'topright' }).addTo(map);
 
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-      attribution: '&copy; OpenStreetMap &copy; CARTO',
-      maxZoom: 18
+L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
+      attribution: 'Tiles &copy; Esri',
+      maxZoom: 16
     }).addTo(map);
 
     let currentMode = 'kecamatan';
@@ -130,12 +130,19 @@
       desa: { geojson: null, dataMap: null }
     };
 
-    function getColor(persen) {
-      if (persen === null || isNaN(persen)) return '#cbd5e1';
-      if (persen >= 80) return '#16a34a';
-      if (persen >= 60) return '#84cc16';
-      if (persen >= 40) return '#f59e0b';
-      return '#dc2626';
+function getColor(persen) {
+      if (persen === null || isNaN(persen)) return '#cbd5e1'; // Abu-abu (Kosong)
+      if (persen > 95) return '#e0f2fe'; // 96% - 100% (Biru sangat muda)
+      if (persen > 90) return '#bae6fd'; // 91% - 95%
+      if (persen > 85) return '#7dd3fc'; // 86% - 90%
+      if (persen > 80) return '#38bdf8'; // 81% - 85%
+      if (persen > 75) return '#0ea5e9'; // 76% - 80%
+      if (persen > 70) return '#0284c7'; // 71% - 75%
+      if (persen > 65) return '#0369a1'; // 66% - 70%
+      if (persen > 60) return '#075985'; // 61% - 65%
+      if (persen > 55) return '#0c4a6e'; // 56% - 60%
+      if (persen > 50) return '#1e3a8a'; // 51% - 55%
+      return '#172554';                  // 0%  - 50% (Biru sangat tua)
     }
 
     function normalizeKey(val) {
@@ -327,15 +334,22 @@
       if (!found) alert(`Wilayah "${e.target.value}" tidak ditemukan pada mode ${currentMode}.`);
     });
 
-    const legend = L.control({ position: 'bottomright' });
+const legend = L.control({ position: 'bottomright' });
     legend.onAdd = () => {
       const div = L.DomUtil.create('div', 'legend');
       div.innerHTML = `
         <h4>Capaian Akses Air Minum</h4>
-        <div><i style="background:#16a34a"></i> &ge; 80% (Tinggi)</div>
-        <div><i style="background:#84cc16"></i> 60% – 79,9% (Sedang)</div>
-        <div><i style="background:#f59e0b"></i> 40% – 59,9% (Rendah)</div>
-        <div><i style="background:#dc2626"></i> &lt; 40% (Prioritas)</div>
+        <div><i style="background:#e0f2fe; border:1px solid #cbd5e1"></i> 96% – 100%</div>
+        <div><i style="background:#bae6fd"></i> 91% – 95%</div>
+        <div><i style="background:#7dd3fc"></i> 86% – 90%</div>
+        <div><i style="background:#38bdf8"></i> 81% – 85%</div>
+        <div><i style="background:#0ea5e9"></i> 76% – 80%</div>
+        <div><i style="background:#0284c7"></i> 71% – 75%</div>
+        <div><i style="background:#0369a1"></i> 66% – 70%</div>
+        <div><i style="background:#075985"></i> 61% – 65%</div>
+        <div><i style="background:#0c4a6e"></i> 56% – 60%</div>
+        <div><i style="background:#1e3a8a"></i> 51% – 55%</div>
+        <div><i style="background:#172554"></i> 0% – 50%</div>
         <div><i style="background:#cbd5e1"></i> Data belum tersedia</div>
       `;
       return div;
