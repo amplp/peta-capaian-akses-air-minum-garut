@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WebGIS Capaian Akses Air Minum - Kabupaten Garut</title>
+
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', system-ui, sans-serif; }
+    body, html { height: 100%; width: 100%; overflow: hidden; }
+    #map { height: 100vh; width: 100vw; z-index: 1; }
+
+    .control-panel {
+      position: absolute; top: 15px; left: 15px; z-index: 1000;
+      background: rgba(255, 255, 255, 0.96); padding: 16px; border-radius: 12px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15); width: 310px; max-width: calc(100vw - 30px);
+    }
+    .control-panel h1 { font-size: 15px; color: #0f172a; margin-bottom: 4px; }
+    .control-panel p.subtitle { font-size: 12px; color: #64748b; margin-bottom: 12px; }
+
+    .layer-toggle { display: flex; gap: 6px; margin-bottom: 12px; }
+    .layer-btn {
+      flex: 1; padding: 8px; border: 1px solid #cbd5e1; background: #f8fafc;
+      color: #334155; border-radius: 8px; font-size: 12px; font-weight: 600; cursor: pointer;
+    }
+    .layer-btn.active { background: #0284c7; color: #ffffff; border-color: #0284c7; }
+
+    .search-box {
+      width: 100%; padding: 8px 10px; border: 1px solid #cbd5e1;
+      border-radius: 8px; font-size: 12px; margin-bottom: 12px; outline: none;
+    }
+    .search-box:focus { border-color: #0284c7; }
+
+    .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .stat-card { background: #f1f5f9; padding: 8px 10px; border-radius: 8px; }
+    .stat-label { font-size: 10px; color: #64748b; text-transform: uppercase; }
+    .stat-value { font-size: 14px; font-weight: 700; color: #0f172a; margin-top: 2px; }
+    .stat-card.highlight { background: #e0f2fe; grid-column: span 2; }
+    .stat-card.highlight .stat-value { color: #0369a1; font-size: 18px; }
+
+    #status-bar { margin-top: 10px; font-size: 11px; color: #475569; }
+
+    .legend {
+      background: rgba(255, 255, 255, 0.95); padding: 12px; border-radius: 10px;
+      box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15); line-height: 20px; font-size: 12px; color: #334155;
+    }
+    .legend h4 { margin-bottom: 6px; font-size: 12px; color: #0f172a; }
+    .legend i { width: 16px; height: 16px; float: left; margin-right: 8px; border-radius: 3px; opacity: 0.9; }
+
+    .popup-title { font-size: 14px; font-weight: 700; color: #0f172a; margin-bottom: 2px; }
+    .popup-sub { font-size: 11px; color: #64748b; margin-bottom: 8px; }
+    .popup-table { width: 100%; font-size: 12px; border-collapse: collapse; }
+    .popup-table td { padding: 3px 0; }
+    .popup-table td:last-child { text-align: right; font-weight: 600; }
+    .progress-bg { width: 100%; height: 8px; background: #e2e8f0; border-radius: 4px; overflow: hidden; margin-top: 8px; }
+    .progress-fill { height: 100%; border-radius: 4px; }
+  </style>
+</head>
+<body>
+
+  <div class="control-panel">
+    <h1>Capaian Akses Air Minum</h1>
+    <p class="subtitle">Kabupaten Garut (Satuan KK • Live Sync)</p>
+
+    <div class="layer-toggle">
+      <button id="btn-kecamatan" class="layer-btn active" onclick="switchMode('kecamatan')">Per Kecamatan</button>
+      <button id="btn-desa" class="layer-btn" onclick="switchMode('desa')">Per Desa</button>
+    </div>
+
+    <input type="text" id="search-input" class="search-box" placeholder="Cari kecamatan / desa, lalu tekan Enter..." />
+
+    <div class="stats-grid">
+      <div class="stat-card highlight">
+        <div class="stat-label">Capaian Kabupaten</div>
+        <div class="stat-value" id="stat-persen">-</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">KK Terlayani</div>
+        <div class="stat-value" id="stat-terlayani">-</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Belum Terlayani</div>
+        <div class="stat-value" id="stat-belum">-</div>
+      </div>
+    </div>
+
+    <div id="status-bar">Memuat data peta...</div>
+  </div>
+
+  <div id="map"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/papaparse@5.4.1/papaparse.min.js"></script>
+
+  <script>
+    // =========================================================================
+    // 1. KONFIGURASI FINAL (GOOGLE SHEETS LIVE + GEOJSON 442 DESA)
+    // =========================================================================
+    const CONFIG = {
+      SHEET_KECAMATAN_CSV: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vTQujJVdQ3crnoRXYQ7tuvxqYh0aBbRSGyrP5IiEhSOdzL1ZkJ2oZNnIfF3oQlhZENqL2GAwZW3skr3/pub?gid=0&single=true&output=csv',
+      SHEET_DESA_CSV: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vTQujJVdQ3crnoRXYQ7tuvxqYh0aBbRSGyrP5IiEhSOdzL1ZkJ2oZNnIfF3oQlhZENqL2GAwZW3skr3/pub?gid=987399893&single=true&output=csv',
+
+      GEOJSON_KECAMATAN: 'data/kecamatan_garut.geojson',
+      GEOJSON_DESA: 'data/desa_garut.geojson',
+
+      GEO_COL_KEC: 'WADMKC',
+      GEO_COL_DESA: 'WADMKD',
+
+      CSV_COL_KEC: 'Kecamatan',
+      CSV_COL_DESA: 'Desa',
+
+      MAP_CENTER: [-7.2279, 107.9087],
+      MAP_ZOOM: 10
+    };
+
+    const map = L.map('map', { zoomControl: false }).setView(CONFIG.MAP_CENTER, CONFIG.MAP_ZOOM);
+    L.control.zoom({ position: 'topright' }).addTo(map);
+
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+      attribution: '&copy; OpenStreetMap &copy; CARTO',
+      maxZoom: 18
+    }).addTo(map);
+
+    let currentMode = 'kecamatan';
+    let currentLayer = null;
+    const cache = {
+      kecamatan: { geojson: null, dataMap: null },
+      desa: { geojson: null, dataMap: null }
+    };
+
+    function getColor(persen) {
+      if (persen === null || isNaN(persen)) return '#cbd5e1';
+      if (persen >= 80) return '#16a34a';
+      if (persen >= 60) return '#84cc16';
+      if (persen >= 40) return '#f59e0b';
+      return '#dc2626';
+    }
+
+    function normalizeKey(val) {
+      return String(val || '').replace(/\s+/g, '').toUpperCase();
+    }
+
+    function makeKey(mode, kec, desa) {
+      return mode === 'desa'
+        ? `${normalizeKey(kec)}|${normalizeKey(desa)}`
+        : normalizeKey(kec);
+    }
+
+    function parseKK(val) {
+      let s = String(val || '0').trim();
+      // Jika ada koma desimal (misal 28633,00000), ambil angka sebelum koma
+      if (/^\d+,\d+$/.test(s) && !/^\d{1,3},\d{3}$/.test(s)) {
+        s = s.split(',')[0];
+      }
+      const cleaned = s.replace(/[^\d]/g, '');
+      return parseInt(cleaned, 10) || 0;
+    }
+
+    function formatRibuan(num) {
+      return new Intl.NumberFormat('id-ID').format(num);
+    }
+
+    async function loadCSV(url) {
+      return new Promise((resolve, reject) => {
+        Papa.parse(url, {
+          download: true,
+          header: true,
+          skipEmptyLines: true,
+          complete: (results) => resolve(results.data),
+          error: (err) => reject(err)
+        });
+      });
+    }
+
+    async function loadModeData(mode) {
+      const statusEl = document.getElementById('status-bar');
+      statusEl.textContent = `Memuat data ${mode}...`;
+
+      if (!cache[mode].geojson || !cache[mode].dataMap) {
+        const csvUrl = mode === 'kecamatan' ? CONFIG.SHEET_KECAMATAN_CSV : CONFIG.SHEET_DESA_CSV;
+        const geoUrl = mode === 'kecamatan' ? CONFIG.GEOJSON_KECAMATAN : CONFIG.GEOJSON_DESA;
+
+        try {
+          const [csvRows, geoResp] = await Promise.all([
+            loadCSV(csvUrl),
+            fetch(geoUrl).then(r => {
+              if (!r.ok) throw new Error(`Gagal memuat ${geoUrl}`);
+              return r.json();
+            })
+          ]);
+
+          const dataMap = {};
+          csvRows.forEach(row => {
+            const key = makeKey(mode, row[CONFIG.CSV_COL_KEC], row[CONFIG.CSV_COL_DESA]);
+            if (!key || key === '|') return;
+
+            const totalKK = parseKK(row['Jumlah_KK']);
+            const terlayani = parseKK(row['KK_Terlayani']);
+            const belum = row['KK_Belum_Terlayani'] !== undefined && row['KK_Belum_Terlayani'] !== ''
+              ? parseKK(row['KK_Belum_Terlayani'])
+              : Math.max(0, totalKK - terlayani);
+            const persen = totalKK > 0 ? (terlayani / totalKK) * 100 : 0;
+
+            dataMap[key] = {
+              nama: mode === 'desa' ? (row[CONFIG.CSV_COL_DESA] || key) : (row[CONFIG.CSV_COL_KEC] || key),
+              kecamatan: row[CONFIG.CSV_COL_KEC] || '-',
+              totalKK, terlayani, belum, persen
+            };
+          });
+
+          cache[mode].geojson = geoResp;
+          cache[mode].dataMap = dataMap;
+        } catch (err) {
+          statusEl.textContent = `Gagal memuat: ${err.message}. Cek link CSV/GeoJSON.`;
+          console.error(err);
+          return null;
+        }
+      }
+      return cache[mode];
+    }
+
+    async function renderMap(mode) {
+      const bundle = await loadModeData(mode);
+      if (!bundle) return;
+
+      if (currentLayer) map.removeLayer(currentLayer);
+      const { geojson, dataMap } = bundle;
+
+      let sumTotal = 0, sumTerlayani = 0, sumBelum = 0;
+      Object.values(dataMap).forEach(d => {
+        sumTotal += d.totalKK;
+        sumTerlayani += d.terlayani;
+        sumBelum += d.belum;
+      });
+      const avgPersen = sumTotal > 0 ? ((sumTerlayani / sumTotal) * 100).toFixed(1) : '0.0';
+
+      document.getElementById('stat-persen').textContent = `${avgPersen}%`;
+      document.getElementById('stat-terlayani').textContent = `${formatRibuan(sumTerlayani)} KK`;
+      document.getElementById('stat-belum').textContent = `${formatRibuan(sumBelum)} KK`;
+
+      currentLayer = L.geoJSON(geojson, {
+        style: (feature) => {
+          const p = feature.properties;
+          const key = makeKey(mode, p[CONFIG.GEO_COL_KEC], p[CONFIG.GEO_COL_DESA]);
+          const data = dataMap[key];
+          return {
+            fillColor: getColor(data ? data.persen : null),
+            weight: mode === 'kecamatan' ? 1.5 : 0.7,
+            opacity: 1,
+            color: '#ffffff',
+            fillOpacity: 0.82
+          };
+        },
+        onEachFeature: (feature, layer) => {
+          const p = feature.properties;
+          const key = makeKey(mode, p[CONFIG.GEO_COL_KEC], p[CONFIG.GEO_COL_DESA]);
+          const data = dataMap[key];
+          const labelNama = data
+            ? data.nama
+            : (mode === 'desa' ? p[CONFIG.GEO_COL_DESA] : p[CONFIG.GEO_COL_KEC]) || 'Tanpa Nama';
+
+          layer.searchName = labelNama.toLowerCase();
+
+          let popupHtml = '';
+          if (data) {
+            const pText = data.persen.toFixed(1);
+            const color = getColor(data.persen);
+            popupHtml = `
+              <div style="min-width: 200px;">
+                <div class="popup-title">${mode === 'desa' ? 'Desa ' : 'Kec. '}${data.nama}</div>
+                ${mode === 'desa' ? `<div class="popup-sub">Kecamatan ${p[CONFIG.GEO_COL_KEC] || data.kecamatan}</div>` : ''}
+                <table class="popup-table">
+                  <tr><td>Total KK</td><td>${formatRibuan(data.totalKK)}</td></tr>
+                  <tr><td>KK Terlayani</td><td style="color:#16a34a;">${formatRibuan(data.terlayani)}</td></tr>
+                  <tr><td>Belum Terlayani</td><td style="color:#dc2626;">${formatRibuan(data.belum)}</td></tr>
+                  <tr><td>Persentase</td><td style="color:${color};">${pText}%</td></tr>
+                </table>
+                <div class="progress-bg">
+                  <div class="progress-fill" style="width:${Math.min(100, data.persen)}%; background:${color};"></div>
+                </div>
+              </div>
+            `;
+          } else {
+            popupHtml = `<b>${labelNama}</b>${mode === 'desa' && p[CONFIG.GEO_COL_KEC] ? `<br><span style="color:#64748b;font-size:11px;">Kecamatan ${p[CONFIG.GEO_COL_KEC]}</span>` : ''}<br><span style="color:#64748b;font-size:12px;">Data belum tersedia di Google Sheets</span>`;
+          }
+
+          layer.bindPopup(popupHtml);
+          layer.bindTooltip(`${labelNama}: ${data ? data.persen.toFixed(1) + '%' : 'N/A'}`, { sticky: true });
+
+          layer.on({
+            mouseover: (e) => {
+              e.target.setStyle({ weight: 2.5, color: '#0f172a', fillOpacity: 0.95 });
+              e.target.bringToFront();
+            },
+            mouseout: (e) => { currentLayer.resetStyle(e.target); }
+          });
+        }
+      }).addTo(map);
+
+      document.getElementById('status-bar').textContent =
+        `Menampilkan ${Object.keys(dataMap).length} data ${mode} (Sinkronisasi aktif).`;
+    }
+
+    function switchMode(mode) {
+      currentMode = mode;
+      document.getElementById('btn-kecamatan').classList.toggle('active', mode === 'kecamatan');
+      document.getElementById('btn-desa').classList.toggle('active', mode === 'desa');
+      renderMap(mode);
+    }
+
+    document.getElementById('search-input').addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' || !currentLayer) return;
+      const query = e.target.value.trim().toLowerCase();
+      if (!query) return;
+
+      let found = false;
+      currentLayer.eachLayer((layer) => {
+        if (!found && layer.searchName && layer.searchName.includes(query)) {
+          map.fitBounds(layer.getBounds(), { maxZoom: 14 });
+          layer.openPopup();
+          found = true;
+        }
+      });
+
+      if (!found) alert(`Wilayah "${e.target.value}" tidak ditemukan pada mode ${currentMode}.`);
+    });
+
+    const legend = L.control({ position: 'bottomright' });
+    legend.onAdd = () => {
+      const div = L.DomUtil.create('div', 'legend');
+      div.innerHTML = `
+        <h4>Capaian Akses Air Minum</h4>
+        <div><i style="background:#16a34a"></i> &ge; 80% (Tinggi)</div>
+        <div><i style="background:#84cc16"></i> 60% – 79,9% (Sedang)</div>
+        <div><i style="background:#f59e0b"></i> 40% – 59,9% (Rendah)</div>
+        <div><i style="background:#dc2626"></i> &lt; 40% (Prioritas)</div>
+        <div><i style="background:#cbd5e1"></i> Data belum tersedia</div>
+      `;
+      return div;
+    };
+    legend.addTo(map);
+
+    renderMap('kecamatan');
+  </script>
+</body>
+</html>
